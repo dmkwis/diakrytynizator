@@ -70,7 +70,6 @@ section .bss
         output_buffer resb SIZE_OF_OUTPUT_BUFFER ; Pointer to an array in which output bytes will be stored
         processed_input_bytes resq 1 ; Pointer to an integer representing number of processed bytes in input_buffer
         bytes_in_buffer resq 1 ; Pointer to an integer representing number of not processed bytes in input_buffer
-        end_of_input resq 1 ; Pointer to a logical value: 0 - if there are bytes left to read, 1 otherwise
         used_output_bytes resq 1 ; Pointer to an integer representing how many bytes in output_buffer are filled
         coeff_num resq 1 ; Pointer to an integer representing how many polynomial coefficients are given
         how_many_bytes_read resq 1; Pointer to an integer repesenting how many bytes were read to input buffer
@@ -79,7 +78,7 @@ section .text
         global _start
 
 ; Function reading set number of bytes to input_buffer
-; Changes value in [end_of_input] if there are no more bytes to read
+; Ends program if there are no more bytes to read by jumping to _start_end_of_reading
 ; Used registers: rax, rdi, rsi, rdx, r15
 _read_input:
         xor rax, rax
@@ -87,14 +86,14 @@ _read_input:
         mov rsi, input_buffer
         mov rdx, SIZE_OF_MAX_READ
         syscall
+        cmp rax, 0
+        je _start_end_of_reading
         mov [how_many_bytes_read], rax
         mov [bytes_in_buffer], rax
         mov r15, 0
         mov [processed_input_bytes], r15
         cmp rax, 0
         jne _read_input_return
-        mov r15, 1
-        mov [end_of_input], r15
 _read_input_return:
         ret
 
@@ -322,7 +321,13 @@ _get_rest_of_bytes:
         add rsi, [how_many_bytes_read]
         mov rdx, rcx
         sub rdx, [bytes_in_buffer]
+        push rdx
+
         syscall
+
+        pop rdx
+        cmp rax, rdx
+        jne _wrong_utf8_encoding
 
 _get_rest_of_bytes_return:
         ret
@@ -345,7 +350,6 @@ _not_enough_args:
 _start:
         mov r15, 0 ; Setting default values of variables used in whole program
         mov [how_many_bytes_read], r15
-        mov [end_of_input], r15
         mov [processed_input_bytes], r15
         mov [bytes_in_buffer], r15
         mov [used_output_bytes], r15
@@ -359,9 +363,6 @@ _start:
         call _convert_polynomial_coefficients
 _start_loop:
         call _get_character ; Reads character
-        mov r15, [end_of_input]
-        cmp r15, 1
-        je _start_end_of_reading ; If there are no more characters to read then end loop
         cmp rbx, 1
         je _start_loop_write_to_output_buffer ; If the character is using only one byte in utf-8 encoding 
                                               ; just put it to output buffer
@@ -549,6 +550,9 @@ _string_to_int:
         xor rax, rax
         mov r9, 1
         mov r10, MODULO
+        movzx r8, byte [rdi]
+        cmp r8, byte 0
+        je _empty_string
 _string_to_int_loop:
         movzx r8, byte [rdi] ; Checking if the word has ended.
         cmp r8, byte 0 
@@ -570,6 +574,11 @@ _string_to_int_loop:
 
 _string_to_int_exitloop:
         ret
+
+; Function that ends program with exitcode 1.
+; Is called when commandline argument is an empty string.
+_empty_string:
+        exit 1
 
 ; Function checking if given character at r8 is a digit.
 ; If it is not program is finished with exitcode 1.
